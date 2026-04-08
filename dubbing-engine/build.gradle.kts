@@ -67,4 +67,9 @@ dependencies {
     implementation("be.tarsos.dsp:core:2.5")
     implementation("be.tarsos.dsp:jvm:2.5")
     implementation("com.davidecaroselli:sentencepiece-android:0.1.0")
+
+    implementation("com.github.JorenSix:TarsosDSP:v2.5")
+
+    // SentencePiece for Android (via JitPack)
+    implementation("com.github.davidecaroselli:sentencepiece-android:0.1.0")
 }
