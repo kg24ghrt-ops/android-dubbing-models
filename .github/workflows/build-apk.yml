@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,56 +26,37 @@ jobs:
         with:
           api-level: 34
           build-tools: 34.0.0
-          ndk: 26.1.10909125  # Required for native C++ code
+          ndk: 26.1.10909125
 
       - name: Create assets directory
         run: mkdir -p app/src/main/assets
 
-      - name: Download Piper Android binary (Option 1: Direct curl)
+      - name: Download Piper Android binary
+        uses: robinraju/release-downloader@v1.10
+        with:
+          repository: "rhasspy/piper"
+          tag: "2023.11.14-2"
+          fileName: "piper_android_arm64-v8a.tar.gz"
+          out-file-path: "temp"
+          extract: true
+
+      - name: Move Piper binary to assets
         run: |
-          curl -JLO https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_android_arm64-v8a.tar.gz
-          tar -xzf piper_android_arm64-v8a.tar.gz
-          mv piper/piper app/src/main/assets/piper
-          rm -rf piper piper_android_arm64-v8a.tar.gz
+          mkdir -p app/src/main/assets
+          mv temp/piper/piper app/src/main/assets/piper
           chmod +x app/src/main/assets/piper
 
-      # Alternative approach using a dedicated GitHub Action (recommended for robustness)
-      # - name: Download Piper Android binary (Option 2: Release Downloader Action)
-      #   uses: robinraju/release-downloader@v1.10
-      #   with:
-      #     repository: "rhasspy/piper"
-      #     tag: "2023.11.14-2"
-      #     fileName: "piper_android_arm64-v8a.tar.gz"
-      #     out-file-path: "temp"
-      #     extract: true
-      # - name: Move Piper binary from action extraction
-      #   run: |
-      #     mkdir -p app/src/main/assets
-      #     mv temp/piper/piper app/src/main/assets/piper
-      #     chmod +x app/src/main/assets/piper
-
-      - name: Verify Piper binary exists
+      - name: Verify Piper binary
         run: ls -lh app/src/main/assets/piper
 
-      - name: Grant execute permission for gradlew
+      - name: Grant gradlew permission
         run: chmod +x gradlew
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Build release APK (optional)
-        run: ./gradlew assembleRelease --stacktrace
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-      - name: Upload Debug APK artifact
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload Release APK artifact (if built)
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
