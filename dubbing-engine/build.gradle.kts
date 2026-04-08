@@ -63,13 +63,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.26.0")
 
-    // Pitch detection (TarsosDSP) - lightweight
-    implementation("be.tarsos.dsp:core:2.5")
-    implementation("be.tarsos.dsp:jvm:2.5")
-    implementation("com.davidecaroselli:sentencepiece-android:0.1.0")
-
-    implementation("com.github.JorenSix:TarsosDSP:v2.5")
-
-    // SentencePiece for Android (via JitPack)
-    implementation("com.github.davidecaroselli:sentencepiece-android:0.1.0")
+    // Note: Pitch detection and SentencePiece are temporarily stubbed.
+    // TarsosDSP and sentencepiece-android dependencies are removed.
 }

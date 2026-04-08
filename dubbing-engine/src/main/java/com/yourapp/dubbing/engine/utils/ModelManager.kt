@@ -10,8 +10,8 @@ import java.io.FileOutputStream
 import java.util.zip.ZipFile
 
 object ModelManager {
-    // No more BASE_URL—each model has its own direct URL
 
+    // Vosk speech‑recognition models – these are still needed
     private val VOSK_URLS = mapOf(
         "es" to "https://alphacephei.com/vosk/models/vosk-model-small-es-0.22.zip",
         "ja" to "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip",
@@ -20,61 +20,48 @@ object ModelManager {
         "zh" to "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
     )
 
-    private const val PIPER_VOICE_ONNX = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
-    private const val PIPER_VOICE_JSON = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
-
-    private const val NLLB_MODEL_ONNX = "https://huggingface.co/Xenova/nllb-200-distilled-600M/resolve/main/onnx/decoder_model_merged_quantized.onnx"
-    private const val NLLB_SPM_MODEL = "https://huggingface.co/Xenova/nllb-200-distilled-600M/resolve/main/sentencepiece.bpe.model"
-    private const val NLLB_TOKENIZER_JSON = "https://huggingface.co/Xenova/nllb-200-distilled-600M/raw/main/tokenizer.json"
-
+    /**
+     * Downloads (if needed) the Vosk model for the given language.
+     * @return absolute path to the model directory
+     */
     suspend fun ensureVoskModel(context: Context, languageCode: String): String {
         val modelDir = File(context.getExternalFilesDir(null), "models/vosk/$languageCode")
         if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
             modelDir.mkdirs()
-            val url = VOSK_URLS[languageCode] ?: throw IllegalArgumentException("Unsupported language: $languageCode")
+            val url = VOSK_URLS[languageCode]
+                ?: throw IllegalArgumentException("Unsupported language: $languageCode")
             downloadAndExtractZip(url, modelDir)
         }
         return modelDir.absolutePath
     }
 
+    /**
+     * Stubbed – we no longer use a separate translation model.
+     * @return a dummy path (no download occurs)
+     */
     suspend fun ensureTranslatorModel(context: Context): String {
-        val modelDir = File(context.getExternalFilesDir(null), "models/translator")
-        val modelFile = File(modelDir, "decoder_model_merged_quantized.onnx")
-        val spmFile = File(modelDir, "sentencepiece.bpe.model")
-        val tokenizerJsonFile = File(modelDir, "tokenizer.json")
-
-        if (!modelDir.exists()) {
-            modelDir.mkdirs()
-        }
-
-        if (!modelFile.exists()) {
-            downloadFile(NLLB_MODEL_ONNX, modelFile)
-        }
-        if (!spmFile.exists()) {
-            downloadFile(NLLB_SPM_MODEL, spmFile)
-        }
-        if (!tokenizerJsonFile.exists()) {
-            downloadFile(NLLB_TOKENIZER_JSON, tokenizerJsonFile)
-        }
-
-        return modelFile.absolutePath
+        // Translation is stubbed, so we don't need a real model.
+        return "/dummy/translator"
     }
 
+    /**
+     * Stubbed – we now use Android's built‑in TTS (NekoSpeak) instead of Piper.
+     * @return a dummy path (no download occurs)
+     */
     suspend fun ensurePiperVoice(context: Context, voiceName: String): String {
-        val voiceDir = File(context.getExternalFilesDir(null), "models/piper/$voiceName")
-        if (!voiceDir.exists()) {
-            voiceDir.mkdirs()
-            downloadFile(PIPER_VOICE_ONNX, File(voiceDir, "$voiceName.onnx"))
-            downloadFile(PIPER_VOICE_JSON, File(voiceDir, "$voiceName.onnx.json"))
-        }
-        return File(voiceDir, "$voiceName.onnx").absolutePath
+        // TTS is handled by the system, no model download needed.
+        return "/dummy/tts/voice"
     }
+
+    // ---------- Helper functions ----------
 
     private suspend fun downloadFile(url: String, destination: File) {
         val client = OkHttpClient.Builder().build()
         val request = Request.Builder().url(url).build()
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Download failed: ${response.code} for $url")
+            if (!response.isSuccessful) {
+                throw Exception("Download failed: ${response.code} for $url")
+            }
             response.body?.byteStream()?.use { input ->
                 FileOutputStream(destination).use { output ->
                     input.copyTo(output)
@@ -94,7 +81,9 @@ object ModelManager {
                 } else {
                     file.parentFile?.mkdirs()
                     zip.getInputStream(entry).use { input ->
-                        FileOutputStream(file).use { output -> input.copyTo(output) }
+                        FileOutputStream(file).use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
             }

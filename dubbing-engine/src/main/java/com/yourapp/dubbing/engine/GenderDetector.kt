@@ -3,16 +3,9 @@ package com.yourapp.dubbing.engine
 import java.io.File
 
 class GenderDetector {
-    companion object {
-        init {
-            System.loadLibrary("pitch_detector")
-        }
-    }
-    
-    private external fun nativeEstimatePitch(audioFilePath: String): Float
-    
+    // Stub: always returns female (or male) - no native dependency
     fun isFemaleVoice(audioFile: File): Boolean {
-        val pitch = nativeEstimatePitch(audioFile.absolutePath)
-        return pitch > 165f
+        // TODO: Replace with actual pitch detection later
+        return true
     }
 }
