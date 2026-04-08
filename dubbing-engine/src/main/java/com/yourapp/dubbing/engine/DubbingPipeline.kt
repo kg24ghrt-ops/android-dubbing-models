@@ -1,12 +1,14 @@
+// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/DubbingPipeline.kt
 package com.yourapp.dubbing.engine
 
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import com.yourapp.dubbing.engine.utils.ModelManager
+import com.yourapp.dubbing.engine.utils.ModelManager   // <-- ADD THIS
 import java.io.File
 
+// ... rest of file unchanged ...
 class DubbingPipeline(private val context: Context) {
 
     private val audioExtractor = AudioExtractor()
