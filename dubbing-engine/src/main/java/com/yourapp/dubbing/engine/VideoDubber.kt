@@ -1,4 +1,3 @@
-// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/VideoDubber.kt
 package com.yourapp.dubbing.engine
 
 import android.content.Context
@@ -23,15 +22,15 @@ class VideoDubber(private val context: Context) {
         val mediaItem = MediaItem.fromUri(videoUri)
         val editedMediaItem = EditedMediaItem.Builder(mediaItem)
             .setRemoveAudio(true)
-            .setAudioTrackReplacementFile(newAudioFile)   // Works in 1.3.0
+            .setAudioTrackReplacementFile(newAudioFile)
             .build()
 
         transformer.start(editedMediaItem, outputFile.absolutePath)
         transformer.addListener(object : Transformer.Listener {
-            override fun onCompleted(mediaItem: MediaItem, result: ExportResult) {
+            override fun onCompleted(composition: androidx.media3.common.Composition, result: ExportResult) {
                 cont.resume(outputFile)
             }
-            override fun onError(mediaItem: MediaItem, exception: ExportException) {
+            override fun onError(composition: androidx.media3.common.Composition, exception: ExportException) {
                 cont.resumeWithException(exception)
             }
         })
