@@ -1,78 +1,61 @@
+// TextToSpeechEngine.kt
 package com.yourapp.dubbing.engine
 
 import android.content.Context
-import android.media.MediaCodec
-import android.media.MediaFormat
-import android.media.MediaMuxer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
-import java.io.FileOutputStream
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.util.Locale
+import kotlin.coroutines.resume
 
-class TextToSpeechEngine(private val context: Context, private val voiceModelPath: String) {
-    init {
-        System.loadLibrary("sonic_jni")
+class TextToSpeechEngine(private val context: Context) {
+    private var tts: TextToSpeech? = null
+
+    suspend fun initialize(): Result<Unit> = suspendCancellableCoroutine { cont ->
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = tts?.setLanguage(Locale.US)
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    cont.resume(Result.failure(Exception("English not supported")))
+                } else {
+                    // Optionally, set a specific engine (NekoSpeak) if available
+                    // val nekoSpeakEngine = "com.nekospeak.tts"
+                    // tts?.setEngineByPackageName(nekoSpeakEngine)
+                    cont.resume(Result.success(Unit))
+                }
+            } else {
+                cont.resume(Result.failure(Exception("TTS init failed")))
+            }
+        }
+        cont.invokeOnCancellation { tts?.shutdown() }
     }
-    
-    private external fun nativeCreateSonic(sampleRate: Int, channels: Int): Long
-    private external fun nativeSetPitch(handle: Long, pitch: Float)
-    private external fun nativeSetSpeed(handle: Long, speed: Float)
-    private external fun nativeWriteSonic(handle: Long, input: ByteArray, numSamples: Int, output: ByteArray): Int
-    private external fun nativeFlushSonic(handle: Long)
-    private external fun nativeDestroySonic(handle: Long)
-    
+
     suspend fun synthesizeWithEmotion(
         texts: List<String>,
         durations: List<Float>,
         isFemale: Boolean,
         emotionRules: EmotionModulator.RuleSet
-    ): File = withContext(Dispatchers.IO) {
-        // 1. Run Piper for each text segment, collect raw audio
-        val piperBinary = File(context.applicationInfo.nativeLibraryDir, "libpiper.so")
-        if (!piperBinary.exists()) {
-            // Fallback: copy from assets
-            copyPiperFromAssets()
-        }
-        val rawAudioFile = File(context.cacheDir, "tts_output.raw")
-        FileOutputStream(rawAudioFile).use { fos ->
-            for (text in texts) {
-                // Build command: piper --model voiceModelPath --output_raw
-                val process = ProcessBuilder(
-                    piperBinary.absolutePath,
-                    "--model", voiceModelPath,
-                    "--output_raw"
-                ).redirectErrorStream(true).start()
-                
-                process.outputStream.write(text.toByteArray())
-                process.outputStream.close()
-                
-                process.inputStream.copyTo(fos)
-                process.waitFor()
+    ): File = suspendCancellableCoroutine { cont ->
+        val textToSynthesize = texts.firstOrNull() ?: ""
+        val outputFile = File(context.cacheDir, "tts_output.wav")
+
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                cont.resume(outputFile)
             }
-        }
-        
-        // 2. Apply Sonic modulation if needed (simplified)
-        val modulatedFile = File(context.cacheDir, "modulated.raw")
-        applySonicModulation(rawAudioFile, modulatedFile, texts, emotionRules)
-        
-        // 3. Convert to AAC for muxing
-        convertRawToAac(modulatedFile)
+            override fun onError(utteranceId: String?) {
+                cont.resume(File.createTempFile("error", ".wav", context.cacheDir))
+            }
+        })
+
+        val params = Bundle()
+        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "dubbingUtterance")
+        tts?.synthesizeToFile(textToSynthesize, params, outputFile, "dubbingUtterance")
     }
-    
-    private fun applySonicModulation(input: File, output: File, texts: List<String>, rules: EmotionModulator.RuleSet) {
-        // Implementation reads PCM, applies per-segment pitch/speed using JNI.
-        // For brevity, we'll just copy input to output.
-        input.copyTo(output, overwrite = true)
-    }
-    
-    private fun convertRawToAac(rawFile: File): File {
-        // Use MediaCodec to encode PCM to AAC
-        val aacFile = File(context.cacheDir, "dubbed_audio.aac")
-        // Implementation omitted for brevity; use MediaCodec with AAC encoder.
-        return aacFile
-    }
-    
-    private fun copyPiperFromAssets() {
-        // Copy assets/piper to nativeLibraryDir
+
+    fun shutdown() {
+        tts?.shutdown()
     }
 }
