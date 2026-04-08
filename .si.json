@@ -29,6 +29,10 @@
     ".yml": {
       "enabled": true,
       "run": "yaml-language-server --stdio"
+    },
+    ".sh": {
+      "enabled": true,
+      "run": "bash-language-server start"
     }
   }
 }

@@ -4,12 +4,9 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.yourapp.dubbing.engine.utils.ModelManager
 import java.io.File
 
-/**
- * Main entry point for video dubbing.
- * Orchestrates: extract audio → STT → translation → gender detect → TTS → mux.
- */
 class DubbingPipeline(private val context: Context) {
 
     private val audioExtractor = AudioExtractor()
@@ -31,8 +28,9 @@ class DubbingPipeline(private val context: Context) {
                 translator = Translator(context, translatorModelPath)
 
                 onProgress("Initializing TTS engine...")
-                val ttsVoicePath = ModelManager.ensurePiperVoice(context, "en_US-lessac-medium")
-                ttsEngine = TextToSpeechEngine(context, ttsVoicePath)
+                // TextToSpeechEngine now only needs Context
+                ttsEngine = TextToSpeechEngine(context)
+                ttsEngine.initialize().getOrThrow()
 
                 genderDetector = GenderDetector()
                 videoDubber = VideoDubber(context)
@@ -51,19 +49,15 @@ class DubbingPipeline(private val context: Context) {
     ): Result<File> {
         return withContext(Dispatchers.IO) {
             try {
-                // 1. Extract audio track as WAV
                 onProgress(DubbingState.ExtractingAudio)
                 val audioFile = audioExtractor.extractAudio(context, inputUri)
 
-                // 2. Speech-to-Text
                 onProgress(DubbingState.RecognizingSpeech)
                 val transcriptSegments = speechRecognizer.transcribeFile(audioFile)
 
-                // 3. Gender detection from original audio
                 onProgress(DubbingState.DetectingGender)
                 val isFemale = genderDetector.isFemaleVoice(audioFile)
 
-                // 4. Translate each segment
                 onProgress(DubbingState.Translating)
                 val translatedSegments = translator.translateBatch(
                     transcriptSegments.map { it.text },
@@ -71,7 +65,6 @@ class DubbingPipeline(private val context: Context) {
                     "en"
                 )
 
-                // 5. Synthesize speech with emotion modulation
                 onProgress(DubbingState.SynthesizingSpeech)
                 val ttsAudioFile = ttsEngine.synthesizeWithEmotion(
                     translatedSegments,
@@ -80,7 +73,6 @@ class DubbingPipeline(private val context: Context) {
                     EmotionModulator.PunctuationRules
                 )
 
-                // 6. Mux new audio into video
                 onProgress(DubbingState.MuxingVideo)
                 val outputFile = videoDubber.replaceAudioTrack(inputUri, ttsAudioFile)
 

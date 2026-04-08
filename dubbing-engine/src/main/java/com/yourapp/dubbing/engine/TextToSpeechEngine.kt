@@ -2,6 +2,7 @@
 package com.yourapp.dubbing.engine
 
 import android.content.Context
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -19,9 +20,6 @@ class TextToSpeechEngine(private val context: Context) {
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     cont.resume(Result.failure(Exception("English not supported")))
                 } else {
-                    // Optionally, set a specific engine (NekoSpeak) if available
-                    // val nekoSpeakEngine = "com.nekospeak.tts"
-                    // tts?.setEngineByPackageName(nekoSpeakEngine)
                     cont.resume(Result.success(Unit))
                 }
             } else {

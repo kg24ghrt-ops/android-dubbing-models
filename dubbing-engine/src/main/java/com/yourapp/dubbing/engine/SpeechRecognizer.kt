@@ -2,8 +2,6 @@ package com.yourapp.dubbing.engine
 
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import java.io.File
 import java.io.FileInputStream
 import kotlin.coroutines.resume
@@ -14,50 +12,52 @@ data class TranscriptSegment(val text: String, val startTime: Float, val endTime
 class SpeechRecognizer(private val modelPath: String) {
     private var model: Model? = null
     private var recognizer: Recognizer? = null
-    
+
     suspend fun transcribeFile(audioFile: File): List<TranscriptSegment> = suspendCoroutine { cont ->
         try {
             model = Model(modelPath)
+            // 16000 Hz is the sample rate expected by Vosk
             recognizer = Recognizer(model, 16000f)
-            val service = SpeechService(recognizer, 16000f)
-            val segments = mutableListOf<TranscriptSegment>()
             
-            service.setRecognitionListener(object : RecognitionListener {
-                override fun onPartialResult(hypothesis: String?) {}
-                override fun onResult(hypothesis: String?) {
-                    hypothesis?.let { json ->
-                        // Parse Vosk result to get words with timings
-                        // Example: {"result":[{"word":"hola","start":0.5,"end":0.8}]}
-                        // For simplicity, we just take the full text.
-                        val text = extractTextFromJson(json)
+            val segments = mutableListOf<TranscriptSegment>()
+            val buffer = ByteArray(4096)
+            
+            FileInputStream(audioFile).use { fis ->
+                var bytesRead: Int
+                while (fis.read(buffer).also { bytesRead = it } != -1) {
+                    // Feed audio data to recognizer
+                    if (recognizer!!.acceptWaveForm(buffer, bytesRead)) {
+                        // Result is ready
+                        val result = recognizer!!.result
+                        if (result != null) {
+                            val text = extractTextFromJson(result)
+                            if (text.isNotBlank()) {
+                                segments.add(TranscriptSegment(text, 0f, 0f))
+                            }
+                        }
+                    }
+                }
+                // Get final result
+                val finalResult = recognizer!!.finalResult
+                if (finalResult != null) {
+                    val text = extractTextFromJson(finalResult)
+                    if (text.isNotBlank()) {
                         segments.add(TranscriptSegment(text, 0f, 0f))
                     }
                 }
-                override fun onFinalResult(hypothesis: String?) {
-                    // Last result
-                }
-                override fun onError(exception: Exception?) {
-                    cont.resume(emptyList())
-                }
-                override fun onTimeout() {}
-            })
-            
-            FileInputStream(audioFile).use { fis ->
-                val buffer = ByteArray(4096)
-                var bytesRead: Int
-                while (fis.read(buffer).also { bytesRead = it } != -1) {
-                    service.acceptWaveForm(buffer, bytesRead)
-                }
             }
-            service.stop()
+            
+            recognizer?.close()
+            model?.close()
+            
             cont.resume(segments)
         } catch (e: Exception) {
             cont.resume(emptyList())
         }
     }
-    
+
     private fun extractTextFromJson(json: String): String {
-        // Simple regex, better to use JSON parser
+        // Extract the "text" field from Vosk JSON result
         val pattern = "\"text\"\\s*:\\s*\"([^\"]+)\"".toRegex()
         return pattern.find(json)?.groupValues?.get(1) ?: ""
     }
