@@ -1,0 +1,34 @@
+{
+  "plugin": "org.smartide.plugin.editor",
+  "run": "echo 'change command from .si.json file'",
+  "intelligence": {
+    ".xml": {
+      "enabled": true,
+      "run": "lemminx"
+    },
+    ".kts": {
+      "enabled": true,
+      "run": "kotlin-language-server"
+    },
+    ".kt": {
+      "enabled": true,
+      "run": "kotlin-language-server"
+    },
+    ".cpp": {
+      "enabled": true,
+      "run": "clangd"
+    },
+    ".c": {
+      "enabled": true,
+      "run": "clangd"
+    },
+    ".h": {
+      "enabled": true,
+      "run": "clangd"
+    },
+    ".yml": {
+      "enabled": true,
+      "run": "yaml-language-server --stdio"
+    }
+  }
+}
