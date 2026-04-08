@@ -26,7 +26,15 @@ jobs:
         with:
           api-level: 34
           build-tools: 34.0.0
-          ndk: 26.1.10909125
+          ndk: 25.1.8937393   # Match the version your project expects
+
+      - name: Create gradle.properties
+        run: |
+          cat > gradle.properties << 'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m
+          EOF
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
