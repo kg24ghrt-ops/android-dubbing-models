@@ -26,18 +26,33 @@ jobs:
         with:
           api-level: 34
           build-tools: 34.0.0
-          ndk: 26.1.10909125  # Required for native C++ code (Sonic, pitch detector)
+          ndk: 26.1.10909125  # Required for native C++ code
 
       - name: Create assets directory
         run: mkdir -p app/src/main/assets
 
-      - name: Download Piper Android binary
+      - name: Download Piper Android binary (Option 1: Direct curl)
         run: |
-          curl -L -o piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_android_arm64-v8a.tar.gz
-          tar -xzf piper.tar.gz
+          curl -JLO https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_android_arm64-v8a.tar.gz
+          tar -xzf piper_android_arm64-v8a.tar.gz
           mv piper/piper app/src/main/assets/piper
-          rm -rf piper piper.tar.gz
+          rm -rf piper piper_android_arm64-v8a.tar.gz
           chmod +x app/src/main/assets/piper
+
+      # Alternative approach using a dedicated GitHub Action (recommended for robustness)
+      # - name: Download Piper Android binary (Option 2: Release Downloader Action)
+      #   uses: robinraju/release-downloader@v1.10
+      #   with:
+      #     repository: "rhasspy/piper"
+      #     tag: "2023.11.14-2"
+      #     fileName: "piper_android_arm64-v8a.tar.gz"
+      #     out-file-path: "temp"
+      #     extract: true
+      # - name: Move Piper binary from action extraction
+      #   run: |
+      #     mkdir -p app/src/main/assets
+      #     mv temp/piper/piper app/src/main/assets/piper
+      #     chmod +x app/src/main/assets/piper
 
       - name: Verify Piper binary exists
         run: ls -lh app/src/main/assets/piper
