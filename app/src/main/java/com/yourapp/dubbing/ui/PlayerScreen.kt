@@ -1,3 +1,4 @@
+// app/src/main/java/com/yourapp/dubbing/ui/PlayerScreen.kt
 package com.yourapp.dubbing.ui
 
 import android.net.Uri
@@ -8,9 +9,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -26,11 +24,11 @@ fun PlayerScreen(videoPath: String?) {
             playWhenReady = true
         }
     }
-    
+
     DisposableEffect(Unit) {
         onDispose { player.release() }
     }
-    
+
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
