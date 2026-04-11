@@ -12,6 +12,8 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
 class VideoDubber(private val context: Context) {
@@ -19,42 +21,64 @@ class VideoDubber(private val context: Context) {
     suspend fun replaceAudioTrack(videoUri: Uri, ttsAudioFile: File): File = withContext(Dispatchers.IO) {
         val outputFile = File(context.cacheDir, "dubbed_${System.currentTimeMillis()}.mp4")
         
-        // Step 1: Ensure TTS audio is in AAC format
-        val aacAudioFile = convertToAAC(ttsAudioFile)
+        // Debug: inspect TTS format
+        inspectAudioFormat(ttsAudioFile)
         
-        // Step 2: Mux video with the AAC audio
-        muxVideoWithAudio(videoUri, aacAudioFile, outputFile)
+        // Step 1: Convert TTS audio to proper AAC in an MP4 container
+        val aacMp4File = convertToAacMp4(ttsAudioFile)
+        
+        // Step 2: Mux video with the new audio
+        muxVideoWithAudio(videoUri, aacMp4File, outputFile)
         
         outputFile
     }
     
-    private fun convertToAAC(inputFile: File): File {
-        val outputFile = File(context.cacheDir, "tts_audio.aac")
+    private fun inspectAudioFormat(file: File) {
+        try {
+            MediaExtractor().use { extractor ->
+                extractor.setDataSource(file.absolutePath)
+                val format = extractor.getTrackFormat(0)
+                Log.d("VideoDubber", "--- TTS Audio Format ---")
+                Log.d("VideoDubber", "MIME: ${format.getString(MediaFormat.KEY_MIME)}")
+                Log.d("VideoDubber", "Sample Rate: ${format.getInteger(MediaFormat.KEY_SAMPLE_RATE)}")
+                Log.d("VideoDubber", "Channels: ${format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)}")
+            }
+        } catch (e: Exception) {
+            Log.e("VideoDubber", "Could not inspect audio format", e)
+        }
+    }
+    
+    /**
+     * Converts any audio file to AAC inside an MP4 container.
+     * Returns a file that MediaMuxer can easily consume.
+     */
+    private fun convertToAacMp4(inputFile: File): File {
+        val outputFile = File(context.cacheDir, "tts_aac.mp4")
         var extractor: MediaExtractor? = null
+        var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
         var muxerStarted = false
-        var trackIndex = -1
-
+        var audioTrackIndex = -1
+        
         try {
+            // 1. Setup extractor for input file
             extractor = MediaExtractor()
             extractor.setDataSource(inputFile.absolutePath)
-
+            
             val inputFormat = extractor.getTrackFormat(0)
-            val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: ""
+            val inputMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: ""
             extractor.selectTrack(0)
-
-            // If already AAC, just return the original file
-            if (mime == MediaFormat.MIMETYPE_AUDIO_AAC) {
-                return inputFile
-            }
-
-            // Create AAC encoder
-            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            
+            // 2. Create decoder for the input format
+            decoder = MediaCodec.createDecoderByType(inputMime)
+            decoder.configure(inputFormat, null, null, 0)
+            decoder.start()
+            
+            // 3. Create AAC encoder
             val sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             val channelCount = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-
-            val outputFormat = MediaFormat.createAudioFormat(
+            val encoderFormat = MediaFormat.createAudioFormat(
                 MediaFormat.MIMETYPE_AUDIO_AAC,
                 sampleRate,
                 channelCount
@@ -62,115 +86,138 @@ class VideoDubber(private val context: Context) {
                 setInteger(MediaFormat.KEY_BIT_RATE, 128000)
                 setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
             }
-
-            encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            encoder.configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             encoder.start()
-
+            
+            // 4. Create muxer for output (MP4)
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
+            
+            // 5. Feed input -> decoder -> encoder -> muxer
             val inputBuffer = ByteBuffer.allocate(1024 * 1024)
             var inputEos = false
-
-            while (!inputEos) {
-                // Feed raw audio to encoder
-                val inputBufferIndex = encoder.dequeueInputBuffer(10000)
-                if (inputBufferIndex >= 0) {
-                    val buffer = encoder.getInputBuffer(inputBufferIndex)!!
-                    buffer.clear()
-                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                    if (sampleSize < 0) {
-                        encoder.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        inputEos = true
-                    } else {
-                        inputBuffer.flip()
-                        buffer.put(inputBuffer)
-                        encoder.queueInputBuffer(inputBufferIndex, 0, sampleSize, extractor.sampleTime, 0)
-                        extractor.advance()
+            var decoderOutputEos = false
+            
+            while (!decoderOutputEos) {
+                // Feed extractor to decoder
+                if (!inputEos) {
+                    val inIdx = decoder.dequeueInputBuffer(10000)
+                    if (inIdx >= 0) {
+                        val buf = decoder.getInputBuffer(inIdx)!!
+                        buf.clear()
+                        val size = extractor.readSampleData(inputBuffer, 0)
+                        if (size < 0) {
+                            decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputEos = true
+                        } else {
+                            inputBuffer.flip()
+                            buf.put(inputBuffer)
+                            decoder.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
                     }
                 }
-
-                // Get encoded AAC data
-                val info = MediaCodec.BufferInfo()
-                var outputBufferIndex = encoder.dequeueOutputBuffer(info, 10000)
-                while (outputBufferIndex >= 0) {
-                    val encodedData = encoder.getOutputBuffer(outputBufferIndex)!!
-
-                    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                        // Codec config – ignore
-                        encoder.releaseOutputBuffer(outputBufferIndex, false)
+                
+                // Get decoded PCM from decoder
+                val decInfo = MediaCodec.BufferInfo()
+                val decOutIdx = decoder.dequeueOutputBuffer(decInfo, 10000)
+                if (decOutIdx >= 0) {
+                    val decodedData = decoder.getOutputBuffer(decOutIdx)!!
+                    
+                    if (decInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        // Signal encoder EOS
+                        val encInIdx = encoder.dequeueInputBuffer(10000)
+                        if (encInIdx >= 0) {
+                            encoder.queueInputBuffer(encInIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        }
+                        decoderOutputEos = true
+                    } else if (decInfo.size > 0) {
+                        // Feed PCM to encoder
+                        val encInIdx = encoder.dequeueInputBuffer(10000)
+                        if (encInIdx >= 0) {
+                            val encInBuf = encoder.getInputBuffer(encInIdx)!!
+                            encInBuf.clear()
+                            decodedData.position(decInfo.offset)
+                            decodedData.limit(decInfo.offset + decInfo.size)
+                            encInBuf.put(decodedData)
+                            encoder.queueInputBuffer(encInIdx, 0, decInfo.size, decInfo.presentationTimeUs, 0)
+                        }
+                    }
+                    decoder.releaseOutputBuffer(decOutIdx, false)
+                }
+                
+                // Get encoded AAC from encoder
+                val encInfo = MediaCodec.BufferInfo()
+                val encOutIdx = encoder.dequeueOutputBuffer(encInfo, 10000)
+                while (encOutIdx >= 0) {
+                    val encData = encoder.getOutputBuffer(encOutIdx)!!
+                    if (encInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                        // Ignore codec config
+                        encoder.releaseOutputBuffer(encOutIdx, false)
                     } else {
-                        // Add track on first valid frame
                         if (!muxerStarted) {
-                            trackIndex = muxer.addTrack(encoder.outputFormat)
+                            audioTrackIndex = muxer.addTrack(encoder.outputFormat)
                             muxer.start()
                             muxerStarted = true
                         }
-                        encodedData.position(info.offset)
-                        encodedData.limit(info.offset + info.size)
-                        muxer.writeSampleData(trackIndex, encodedData, info)
-                        encoder.releaseOutputBuffer(outputBufferIndex, false)
+                        encData.position(encInfo.offset)
+                        encData.limit(encInfo.offset + encInfo.size)
+                        muxer.writeSampleData(audioTrackIndex, encData, encInfo)
+                        encoder.releaseOutputBuffer(encOutIdx, false)
                     }
-                    outputBufferIndex = encoder.dequeueOutputBuffer(info, 10000)
+                    encOutIdx = encoder.dequeueOutputBuffer(encInfo, 0)
                 }
             }
-
-            // If no data was written, fall back to original file
-            if (!muxerStarted) {
-                return inputFile
+            
+            // Wait for encoder to finish
+            encoder.signalEndOfInputStream()
+            var encEos = false
+            while (!encEos) {
+                val info = MediaCodec.BufferInfo()
+                val outIdx = encoder.dequeueOutputBuffer(info, 10000)
+                if (outIdx >= 0) {
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        encEos = true
+                    }
+                    encoder.releaseOutputBuffer(outIdx, false)
+                }
             }
-
+            
+            Log.d("VideoDubber", "AAC conversion successful, track added: $audioTrackIndex")
+            
         } catch (e: Exception) {
-            Log.e("VideoDubber", "AAC conversion failed", e)
-            return inputFile   // fallback to original
+            Log.e("VideoDubber", "AAC conversion failed, using original file", e)
+            // Fallback: return original file (will likely fail muxing later, but we tried)
+            return inputFile
         } finally {
-            try {
-                encoder?.stop()
-            } catch (e: IllegalStateException) {
-                // Already stopped or never started
-            }
-            try {
-                encoder?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
-            try {
-                if (muxerStarted) {
-                    muxer?.stop()
-                }
-            } catch (e: IllegalStateException) {
-                // Already stopped
-            }
-            try {
-                muxer?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
-            try {
-                extractor?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
+            try { decoder?.stop() } catch (_: Exception) {}
+            try { decoder?.release() } catch (_: Exception) {}
+            try { encoder?.stop() } catch (_: Exception) {}
+            try { encoder?.release() } catch (_: Exception) {}
+            try { if (muxerStarted) muxer?.stop() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
+            try { extractor?.release() } catch (_: Exception) {}
         }
+        
         return outputFile
     }
-
+    
     private fun muxVideoWithAudio(videoUri: Uri, aacAudioFile: File, outputFile: File) {
         var videoExtractor: MediaExtractor? = null
         var audioExtractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         var muxerStarted = false
-
+        
         try {
-            videoExtractor = MediaExtractor().apply {
-                setDataSource(context, videoUri, null)
-            }
-            audioExtractor = MediaExtractor().apply {
-                setDataSource(aacAudioFile.absolutePath)
-            }
-
+            videoExtractor = MediaExtractor()
+            videoExtractor.setDataSource(context, videoUri, null)
+            
+            audioExtractor = MediaExtractor()
+            audioExtractor.setDataSource(aacAudioFile.absolutePath)
+            
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-            // Find and add video track
+            
+            // Find video track
             var videoTrackIdx = -1
             var muxerVideoTrack = -1
             for (i in 0 until videoExtractor.trackCount) {
@@ -182,23 +229,17 @@ class VideoDubber(private val context: Context) {
                     break
                 }
             }
-
-            // Find and add audio track
-            val audioTrackIdx = 0
-            audioExtractor.selectTrack(audioTrackIdx)
-            val audioFormat = audioExtractor.getTrackFormat(audioTrackIdx)
+            
+            // Find audio track from AAC file (it's an MP4 with one audio track)
+            audioExtractor.selectTrack(0)
+            val audioFormat = audioExtractor.getTrackFormat(0)
             val muxerAudioTrack = muxer.addTrack(audioFormat)
-
-            // Start muxer only if we have at least one track (we always have audio here)
-            if (muxerVideoTrack != -1 || muxerAudioTrack != -1) {
-                muxer.start()
-                muxerStarted = true
-            } else {
-                throw Exception("No tracks to mux")
-            }
-
+            
+            muxer.start()
+            muxerStarted = true
+            
             val buffer = ByteBuffer.allocate(1024 * 1024)
-
+            
             // Write video samples
             if (videoTrackIdx != -1) {
                 var videoEos = false
@@ -208,8 +249,7 @@ class VideoDubber(private val context: Context) {
                     if (size < 0) {
                         videoEos = true
                     } else {
-                        muxer.writeSampleData(
-                            muxerVideoTrack, buffer,
+                        muxer.writeSampleData(muxerVideoTrack, buffer,
                             MediaCodec.BufferInfo().apply {
                                 offset = 0
                                 this.size = size
@@ -220,7 +260,7 @@ class VideoDubber(private val context: Context) {
                     }
                 }
             }
-
+            
             // Write audio samples
             var audioEos = false
             while (!audioEos) {
@@ -229,8 +269,7 @@ class VideoDubber(private val context: Context) {
                 if (size < 0) {
                     audioEos = true
                 } else {
-                    muxer.writeSampleData(
-                        muxerAudioTrack, buffer,
+                    muxer.writeSampleData(muxerAudioTrack, buffer,
                         MediaCodec.BufferInfo().apply {
                             offset = 0
                             this.size = size
@@ -240,33 +279,17 @@ class VideoDubber(private val context: Context) {
                     audioExtractor.advance()
                 }
             }
-
+            
+            Log.d("VideoDubber", "Muxing completed: $outputFile")
+            
         } catch (e: Exception) {
             Log.e("VideoDubber", "Muxing failed", e)
             throw e
         } finally {
-            try {
-                if (muxerStarted) {
-                    muxer?.stop()
-                }
-            } catch (e: IllegalStateException) {
-                // Already stopped
-            }
-            try {
-                muxer?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
-            try {
-                videoExtractor?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
-            try {
-                audioExtractor?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
+            try { if (muxerStarted) muxer?.stop() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
+            try { videoExtractor?.release() } catch (_: Exception) {}
+            try { audioExtractor?.release() } catch (_: Exception) {}
         }
     }
 }
