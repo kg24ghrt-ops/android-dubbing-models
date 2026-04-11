@@ -64,5 +64,5 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.26.0")
 
     // Sherpa-ONNX for offline TTS
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.12.20")
+    implementation(files("libs/sherpa-onnx.aar"))
 }
