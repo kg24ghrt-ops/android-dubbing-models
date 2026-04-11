@@ -1,14 +1,12 @@
-// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/DubbingPipeline.kt
 package com.yourapp.dubbing.engine
 
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import com.yourapp.dubbing.engine.utils.ModelManager   // <-- ADD THIS
+import com.yourapp.dubbing.engine.utils.ModelManager
 import java.io.File
 
-// ... rest of file unchanged ...
 class DubbingPipeline(private val context: Context) {
 
     private val audioExtractor = AudioExtractor()
@@ -30,9 +28,9 @@ class DubbingPipeline(private val context: Context) {
                 translator = Translator(context, translatorModelPath)
 
                 onProgress("Initializing TTS engine...")
-                // TextToSpeechEngine now only needs Context
+                val ttsModelPath = ModelManager.ensurePiperVoice(context)
                 ttsEngine = TextToSpeechEngine(context)
-                ttsEngine.initialize().getOrThrow()
+                ttsEngine.initialize(ttsModelPath).getOrThrow()
 
                 genderDetector = GenderDetector()
                 videoDubber = VideoDubber(context)

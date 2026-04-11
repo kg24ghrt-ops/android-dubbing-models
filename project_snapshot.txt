@@ -1,0 +1,1154 @@
+=== PROJECT SNAPSHOT: android-dubbing-models ===
+Generated: Sat Apr 11 17:34:42 +0630 2026
+
+
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/MainActivity.kt
+================================================
+package com.yourapp.dubbing
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.yourapp.dubbing.ui.PlayerScreen
+import com.yourapp.dubbing.ui.ProcessingScreen
+import com.yourapp.dubbing.ui.VideoPickerScreen
+import com.yourapp.dubbing.ui.theme.VideoDubbingAppTheme
+import com.yourapp.dubbing.viewmodel.DubbingViewModel
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            VideoDubbingAppTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val navController = rememberNavController()
+                    val viewModel: DubbingViewModel = viewModel()
+                    
+                    NavHost(navController, startDestination = "picker") {
+                        composable("picker") {
+                            VideoPickerScreen(navController, viewModel)
+                        }
+                        composable("processing") {
+                            ProcessingScreen(navController, viewModel)
+                        }
+                        composable("player/{videoPath}") { backStackEntry ->
+                            val path = backStackEntry.arguments?.getString("videoPath")
+                            PlayerScreen(path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/ui/PlayerScreen.kt
+================================================
+// app/src/main/java/com/yourapp/dubbing/ui/PlayerScreen.kt
+package com.yourapp.dubbing.ui
+
+import android.net.Uri
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+
+@Composable
+fun PlayerScreen(videoPath: String?) {
+    val context = LocalContext.current
+    val player = remember {
+        ExoPlayer.Builder(context).build().apply {
+            val uri = videoPath?.let { Uri.parse(it) } ?: return@apply
+            setMediaItem(MediaItem.fromUri(uri))
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                this.player = player
+                useController = true
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/ui/ProcessingScreen.kt
+================================================
+package com.yourapp.dubbing.ui
+
+import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import com.yourapp.dubbing.engine.DubbingState
+import com.yourapp.dubbing.viewmodel.DubbingViewModel
+
+@Composable
+fun ProcessingScreen(navController: NavController, viewModel: DubbingViewModel) {
+    val state by viewModel.dubbingState.collectAsState()
+    val context = LocalContext.current
+    
+    LaunchedEffect(Unit) {
+        viewModel.startProcessing(context)
+    }
+    
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (val currentState = state) {
+            is DubbingState.Error -> {
+                Text("Error: ${currentState.message}", color = Color.Red)
+                Button(onClick = { navController.popBackStack() }) {
+                    Text("Go Back")
+                }
+            }
+            is DubbingState.Completed -> {
+                Text("Dubbing complete!")
+                Button(onClick = {
+                    navController.navigate("player/${Uri.encode(currentState.outputFile.absolutePath)}")
+                }) {
+                    Text("Play Dubbed Video")
+                }
+            }
+            else -> {
+                CircularProgressIndicator()
+                Text(
+                    text = when (currentState) {
+                        DubbingState.ExtractingAudio -> "Extracting audio..."
+                        DubbingState.RecognizingSpeech -> "Recognizing speech..."
+                        DubbingState.DetectingGender -> "Detecting gender..."
+                        DubbingState.Translating -> "Translating..."
+                        DubbingState.SynthesizingSpeech -> "Synthesizing voice..."
+                        DubbingState.MuxingVideo -> "Creating final video..."
+                        is DubbingState.Progress -> currentState.message
+                        else -> "Processing..."
+                    },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        }
+    }
+}
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/ui/VideoPickerScreen.kt
+================================================
+package com.yourapp.dubbing.ui
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import com.yourapp.dubbing.viewmodel.DubbingViewModel
+
+@Composable
+fun VideoPickerScreen(navController: NavController, viewModel: DubbingViewModel) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            viewModel.setVideoUri(it)
+            navController.navigate("processing")
+        }
+    }
+    
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Select a video to dub", fontSize = 24.sp)
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(onClick = { launcher.launch("video/*") }) {
+            Text("Choose from Gallery")
+        }
+    }
+}
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/ui/theme/Theme.kt
+================================================
+package com.yourapp.dubbing.ui.theme
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+
+private val DarkColorScheme = darkColorScheme()
+private val LightColorScheme = lightColorScheme()
+
+@Composable
+fun VideoDubbingAppTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
+    MaterialTheme(
+        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
+        content = content
+    )
+}
+================================================
+FILE: ./app/src/main/java/com/yourapp/dubbing/viewmodel/DubbingViewModel.kt
+================================================
+package com.yourapp.dubbing.viewmodel
+
+import android.app.Application
+import android.content.Context
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.yourapp.dubbing.engine.DubbingPipeline
+import com.yourapp.dubbing.engine.DubbingState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+class DubbingViewModel(application: Application) : AndroidViewModel(application) {
+    private val pipeline = DubbingPipeline(application)
+    private val _dubbingState = MutableStateFlow<DubbingState>(DubbingState.Progress("Ready"))
+    val dubbingState: StateFlow<DubbingState> = _dubbingState.asStateFlow()
+    private var videoUri: Uri? = null
+    
+    fun setVideoUri(uri: Uri) {
+        videoUri = uri
+    }
+    
+    fun startProcessing(context: Context) {
+        viewModelScope.launch {
+            val uri = videoUri ?: run {
+                _dubbingState.value = DubbingState.Error("No video selected")
+                return@launch
+            }
+            // For demo, assume Spanish. In production, add language selection UI.
+            val sourceLang = "es"
+            
+            pipeline.initializeModels(sourceLang) { msg ->
+                _dubbingState.value = DubbingState.Progress(msg)
+            }.onFailure { e ->
+                _dubbingState.value = DubbingState.Error(e.message ?: "Initialization failed")
+                return@launch
+            }
+            
+            pipeline.processVideo(uri, sourceLang) { state ->
+                _dubbingState.value = state
+            }
+        }
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/AudioExtractor.kt
+================================================
+// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/AudioExtractor.kt
+package com.yourapp.dubbing.engine
+
+import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+
+class AudioExtractor {
+    suspend fun extractAudio(context: Context, videoUri: Uri): File {
+        val outputFile = File(context.cacheDir, "extracted_audio.pcm")
+        val extractor = MediaExtractor()
+        extractor.setDataSource(context, videoUri, null)
+        
+        var audioTrackIndex = -1
+        for (i in 0 until extractor.trackCount) {
+            val format = extractor.getTrackFormat(i)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+            if (mime.startsWith("audio/")) {
+                audioTrackIndex = i
+                break
+            }
+        }
+        if (audioTrackIndex == -1) throw Exception("No audio track found")
+        extractor.selectTrack(audioTrackIndex)
+        
+        val buffer = ByteBuffer.allocate(1024 * 1024)
+        FileOutputStream(outputFile).use { fos ->
+            while (true) {
+                buffer.clear()
+                val size = extractor.readSampleData(buffer, 0)
+                if (size <= 0) break
+                fos.write(buffer.array(), 0, size)
+                extractor.advance()
+            }
+        }
+        extractor.release()
+        return outputFile
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/DubbingPipeline.kt
+================================================
+// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/DubbingPipeline.kt
+package com.yourapp.dubbing.engine
+
+import android.content.Context
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.yourapp.dubbing.engine.utils.ModelManager   // <-- ADD THIS
+import java.io.File
+
+// ... rest of file unchanged ...
+class DubbingPipeline(private val context: Context) {
+
+    private val audioExtractor = AudioExtractor()
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private lateinit var translator: Translator
+    private lateinit var genderDetector: GenderDetector
+    private lateinit var ttsEngine: TextToSpeechEngine
+    private lateinit var videoDubber: VideoDubber
+
+    suspend fun initializeModels(languageCode: String, onProgress: (String) -> Unit): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                onProgress("Downloading Vosk model for $languageCode...")
+                val voskModelPath = ModelManager.ensureVoskModel(context, languageCode)
+                speechRecognizer = SpeechRecognizer(voskModelPath)
+
+                onProgress("Loading translation model...")
+                val translatorModelPath = ModelManager.ensureTranslatorModel(context)
+                translator = Translator(context, translatorModelPath)
+
+                onProgress("Initializing TTS engine...")
+                // TextToSpeechEngine now only needs Context
+                ttsEngine = TextToSpeechEngine(context)
+                ttsEngine.initialize().getOrThrow()
+
+                genderDetector = GenderDetector()
+                videoDubber = VideoDubber(context)
+
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun processVideo(
+        inputUri: Uri,
+        sourceLanguage: String,
+        onProgress: (DubbingState) -> Unit
+    ): Result<File> {
+        return withContext(Dispatchers.IO) {
+            try {
+                onProgress(DubbingState.ExtractingAudio)
+                val audioFile = audioExtractor.extractAudio(context, inputUri)
+
+                onProgress(DubbingState.RecognizingSpeech)
+                val transcriptSegments = speechRecognizer.transcribeFile(audioFile)
+
+                onProgress(DubbingState.DetectingGender)
+                val isFemale = genderDetector.isFemaleVoice(audioFile)
+
+                onProgress(DubbingState.Translating)
+                val translatedSegments = translator.translateBatch(
+                    transcriptSegments.map { it.text },
+                    sourceLanguage,
+                    "en"
+                )
+
+                onProgress(DubbingState.SynthesizingSpeech)
+                val ttsAudioFile = ttsEngine.synthesizeWithEmotion(
+                    translatedSegments,
+                    transcriptSegments.map { it.endTime },
+                    isFemale,
+                    EmotionModulator.PunctuationRules
+                )
+
+                onProgress(DubbingState.MuxingVideo)
+                val outputFile = videoDubber.replaceAudioTrack(inputUri, ttsAudioFile)
+
+                onProgress(DubbingState.Completed(outputFile))
+                Result.success(outputFile)
+            } catch (e: Exception) {
+                onProgress(DubbingState.Error(e.message ?: "Unknown error"))
+                Result.failure(e)
+            }
+        }
+    }
+}
+
+sealed class DubbingState {
+    object ExtractingAudio : DubbingState()
+    object RecognizingSpeech : DubbingState()
+    object DetectingGender : DubbingState()
+    object Translating : DubbingState()
+    object SynthesizingSpeech : DubbingState()
+    object MuxingVideo : DubbingState()
+    data class Completed(val outputFile: File) : DubbingState()
+    data class Error(val message: String) : DubbingState()
+    data class Progress(val message: String) : DubbingState()
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/EmotionModulator.kt
+================================================
+package com.yourapp.dubbing.engine
+
+object EmotionModulator {
+    interface RuleSet {
+        fun getPitchMultiplier(text: String): Float
+        fun getSpeedMultiplier(text: String): Float
+    }
+    
+    object PunctuationRules : RuleSet {
+        override fun getPitchMultiplier(text: String): Float = when {
+            text.contains("!") -> 1.15f
+            text.contains("?") -> 1.05f
+            text.contains("...") -> 0.90f
+            else -> 1.0f
+        }
+        
+        override fun getSpeedMultiplier(text: String): Float = when {
+            text.contains("!") -> 1.10f
+            text.contains("?") -> 0.95f
+            text.contains("...") -> 0.85f
+            else -> 1.0f
+        }
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/GenderDetector.kt
+================================================
+package com.yourapp.dubbing.engine
+
+import java.io.File
+
+class GenderDetector {
+    // Stub: always returns female (or male) - no native dependency
+    fun isFemaleVoice(audioFile: File): Boolean {
+        // TODO: Replace with actual pitch detection later
+        return true
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/SpeechRecognizer.kt
+================================================
+package com.yourapp.dubbing.engine
+
+import org.vosk.Model
+import org.vosk.Recognizer
+import java.io.File
+import java.io.FileInputStream
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+
+data class TranscriptSegment(val text: String, val startTime: Float, val endTime: Float)
+
+class SpeechRecognizer(private val modelPath: String) {
+    private var model: Model? = null
+    private var recognizer: Recognizer? = null
+
+    suspend fun transcribeFile(audioFile: File): List<TranscriptSegment> = suspendCoroutine { cont ->
+        try {
+            model = Model(modelPath)
+            // 16000 Hz is the sample rate expected by Vosk
+            recognizer = Recognizer(model, 16000f)
+            
+            val segments = mutableListOf<TranscriptSegment>()
+            val buffer = ByteArray(4096)
+            
+            FileInputStream(audioFile).use { fis ->
+                var bytesRead: Int
+                while (fis.read(buffer).also { bytesRead = it } != -1) {
+                    // Feed audio data to recognizer
+                    if (recognizer!!.acceptWaveForm(buffer, bytesRead)) {
+                        // Result is ready
+                        val result = recognizer!!.result
+                        if (result != null) {
+                            val text = extractTextFromJson(result)
+                            if (text.isNotBlank()) {
+                                segments.add(TranscriptSegment(text, 0f, 0f))
+                            }
+                        }
+                    }
+                }
+                // Get final result
+                val finalResult = recognizer!!.finalResult
+                if (finalResult != null) {
+                    val text = extractTextFromJson(finalResult)
+                    if (text.isNotBlank()) {
+                        segments.add(TranscriptSegment(text, 0f, 0f))
+                    }
+                }
+            }
+            
+            recognizer?.close()
+            model?.close()
+            
+            cont.resume(segments)
+        } catch (e: Exception) {
+            cont.resume(emptyList())
+        }
+    }
+
+    private fun extractTextFromJson(json: String): String {
+        // Extract the "text" field from Vosk JSON result
+        val pattern = "\"text\"\\s*:\\s*\"([^\"]+)\"".toRegex()
+        return pattern.find(json)?.groupValues?.get(1) ?: ""
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/TextToSpeechEngine.kt
+================================================
+// TextToSpeechEngine.kt
+package com.yourapp.dubbing.engine
+
+import android.content.Context
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.File
+import java.util.Locale
+import kotlin.coroutines.resume
+
+class TextToSpeechEngine(private val context: Context) {
+    private var tts: TextToSpeech? = null
+
+    suspend fun initialize(): Result<Unit> = suspendCancellableCoroutine { cont ->
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = tts?.setLanguage(Locale.US)
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    cont.resume(Result.failure(Exception("English not supported")))
+                } else {
+                    cont.resume(Result.success(Unit))
+                }
+            } else {
+                cont.resume(Result.failure(Exception("TTS init failed")))
+            }
+        }
+        cont.invokeOnCancellation { tts?.shutdown() }
+    }
+
+    suspend fun synthesizeWithEmotion(
+        texts: List<String>,
+        durations: List<Float>,
+        isFemale: Boolean,
+        emotionRules: EmotionModulator.RuleSet
+    ): File = suspendCancellableCoroutine { cont ->
+        val textToSynthesize = texts.firstOrNull() ?: ""
+        val outputFile = File(context.cacheDir, "tts_output.wav")
+
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                cont.resume(outputFile)
+            }
+            override fun onError(utteranceId: String?) {
+                cont.resume(File.createTempFile("error", ".wav", context.cacheDir))
+            }
+        })
+
+        val params = Bundle()
+        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "dubbingUtterance")
+        tts?.synthesizeToFile(textToSynthesize, params, outputFile, "dubbingUtterance")
+    }
+
+    fun shutdown() {
+        tts?.shutdown()
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/Translator.kt
+================================================
+package com.yourapp.dubbing.engine
+
+import android.content.Context
+
+class Translator(context: Context, modelPath: String) {
+
+    // Stub: returns input text unchanged (no ONNX or SentencePiece)
+    suspend fun translateBatch(texts: List<String>, srcLang: String, tgtLang: String): List<String> {
+        return texts
+    }
+
+    fun close() {
+        // No resources to release
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/VideoDubber.kt
+================================================
+// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/VideoDubber.kt
+package com.yourapp.dubbing.engine
+
+import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
+import android.media.MediaCodecInfo
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.nio.ByteBuffer
+
+class VideoDubber(private val context: Context) {
+
+    suspend fun replaceAudioTrack(videoUri: Uri, ttsAudioFile: File): File = withContext(Dispatchers.IO) {
+        val outputFile = File(context.cacheDir, "dubbed_${System.currentTimeMillis()}.mp4")
+        val aacAudioFile = convertToAAC(ttsAudioFile)
+        muxVideoWithAudio(videoUri, aacAudioFile, outputFile)
+        outputFile
+    }
+
+    private fun convertToAAC(inputFile: File): File {
+        val outputFile = File(context.cacheDir, "tts_audio.aac")
+
+        val extractor = MediaExtractor()
+        extractor.setDataSource(inputFile.absolutePath)
+
+        val inputFormat = extractor.getTrackFormat(0)
+        val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: ""
+        extractor.selectTrack(0)
+
+        if (mime == MediaFormat.MIMETYPE_AUDIO_AAC) {
+            extractor.release()
+            return inputFile
+        }
+
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        val outputFormat = MediaFormat.createAudioFormat(
+            MediaFormat.MIMETYPE_AUDIO_AAC,
+            inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE),
+            inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        ).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, 128000)
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+        }
+
+        encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+
+        val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var trackIndex = -1
+        var muxerStarted = false
+
+        val inputBuffer = ByteBuffer.allocate(1024 * 1024)
+        var inputEos = false
+
+        while (!inputEos) {
+            val inputBufferIndex = encoder.dequeueInputBuffer(10000)
+            if (inputBufferIndex >= 0) {
+                val buffer = encoder.getInputBuffer(inputBufferIndex)!!
+                buffer.clear()
+                val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                if (sampleSize < 0) {
+                    encoder.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    inputEos = true
+                } else {
+                    inputBuffer.flip()
+                    buffer.put(inputBuffer)
+                    encoder.queueInputBuffer(inputBufferIndex, 0, sampleSize, extractor.sampleTime, 0)
+                    extractor.advance()
+                }
+            }
+
+            val info = MediaCodec.BufferInfo()
+            var outputBufferIndex = encoder.dequeueOutputBuffer(info, 10000)
+            while (outputBufferIndex >= 0) {
+                val encodedData = encoder.getOutputBuffer(outputBufferIndex)!!
+                if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                    encoder.releaseOutputBuffer(outputBufferIndex, false)
+                } else {
+                    if (!muxerStarted) {
+                        trackIndex = muxer.addTrack(encoder.outputFormat)
+                        muxer.start()
+                        muxerStarted = true
+                    }
+                    encodedData.position(info.offset)
+                    encodedData.limit(info.offset + info.size)
+                    muxer.writeSampleData(trackIndex, encodedData, info)
+                    encoder.releaseOutputBuffer(outputBufferIndex, false)
+                }
+                outputBufferIndex = encoder.dequeueOutputBuffer(info, 10000)
+            }
+        }
+
+        encoder.stop()
+        encoder.release()
+        extractor.release()
+        muxer.stop()
+        muxer.release()
+
+        return outputFile
+    }
+
+    private fun muxVideoWithAudio(videoUri: Uri, aacAudioFile: File, outputFile: File) {
+        val videoExtractor = MediaExtractor().apply {
+            setDataSource(context, videoUri, null)
+        }
+        val audioExtractor = MediaExtractor().apply {
+            setDataSource(aacAudioFile.absolutePath)
+        }
+
+        val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+        var muxerVideoTrack = -1
+        for (i in 0 until videoExtractor.trackCount) {
+            val format = videoExtractor.getTrackFormat(i)
+            if (format.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) {
+                videoExtractor.selectTrack(i)
+                muxerVideoTrack = muxer.addTrack(format)
+                break
+            }
+        }
+
+        audioExtractor.selectTrack(0)
+        val audioFormat = audioExtractor.getTrackFormat(0)
+        val muxerAudioTrack = muxer.addTrack(audioFormat)
+
+        muxer.start()
+
+        val buffer = ByteBuffer.allocate(1024 * 1024)
+
+        // Copy video (use var for reassignment)
+        var eos = false
+        while (!eos) {
+            buffer.clear()
+            val size = videoExtractor.readSampleData(buffer, 0)
+            if (size < 0) {
+                eos = true
+            } else {
+                muxer.writeSampleData(muxerVideoTrack, buffer,
+                    MediaCodec.BufferInfo().apply {
+                        offset = 0
+                        this.size = size
+                        presentationTimeUs = videoExtractor.sampleTime
+                        flags = videoExtractor.sampleFlags
+                    })
+                videoExtractor.advance()
+            }
+        }
+
+        // Copy audio
+        eos = false
+        while (!eos) {
+            buffer.clear()
+            val size = audioExtractor.readSampleData(buffer, 0)
+            if (size < 0) {
+                eos = true
+            } else {
+                muxer.writeSampleData(muxerAudioTrack, buffer,
+                    MediaCodec.BufferInfo().apply {
+                        offset = 0
+                        this.size = size
+                        presentationTimeUs = audioExtractor.sampleTime
+                        flags = audioExtractor.sampleFlags
+                    })
+                audioExtractor.advance()
+            }
+        }
+
+        muxer.stop()
+        muxer.release()
+        videoExtractor.release()
+        audioExtractor.release()
+    }
+}
+================================================
+FILE: ./dubbing-engine/src/main/java/com/yourapp/dubbing/engine/utils/ModelManager.kt
+================================================
+// dubbing-engine/src/main/java/com/yourapp/dubbing/engine/utils/ModelManager.kt
+
+package com.yourapp.dubbing.engine.utils
+
+import android.content.Context
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipFile
+
+object ModelManager {
+
+    // Vosk speech‑recognition models – these are still needed
+    private val VOSK_URLS = mapOf(
+        "es" to "https://alphacephei.com/vosk/models/vosk-model-small-es-0.22.zip",
+        "ja" to "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip",
+        "ko" to "https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip",
+        "fr" to "https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip",
+        "zh" to "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
+    )
+
+    /**
+     * Downloads (if needed) the Vosk model for the given language.
+     * @return absolute path to the model directory
+     */
+    suspend fun ensureVoskModel(context: Context, languageCode: String): String {
+        val modelDir = File(context.getExternalFilesDir(null), "models/vosk/$languageCode")
+        if (!modelDir.exists() || modelDir.listFiles()?.isEmpty() == true) {
+            modelDir.mkdirs()
+            val url = VOSK_URLS[languageCode]
+                ?: throw IllegalArgumentException("Unsupported language: $languageCode")
+            downloadAndExtractZip(url, modelDir)
+        }
+        return modelDir.absolutePath
+    }
+
+    /**
+     * Stubbed – we no longer use a separate translation model.
+     * @return a dummy path (no download occurs)
+     */
+    suspend fun ensureTranslatorModel(context: Context): String {
+        // Translation is stubbed, so we don't need a real model.
+        return "/dummy/translator"
+    }
+
+    /**
+     * Stubbed – we now use Android's built‑in TTS (NekoSpeak) instead of Piper.
+     * @return a dummy path (no download occurs)
+     */
+    suspend fun ensurePiperVoice(context: Context, voiceName: String): String {
+        // TTS is handled by the system, no model download needed.
+        return "/dummy/tts/voice"
+    }
+
+    // ---------- Helper functions ----------
+
+    private suspend fun downloadFile(url: String, destination: File) {
+        val client = OkHttpClient.Builder().build()
+        val request = Request.Builder().url(url).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Download failed: ${response.code} for $url")
+            }
+            response.body?.byteStream()?.use { input ->
+                FileOutputStream(destination).use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+    }
+
+    private suspend fun downloadAndExtractZip(url: String, destDir: File) {
+        val tempFile = File.createTempFile("model", ".zip")
+        downloadFile(url, tempFile)
+        ZipFile(tempFile).use { zip ->
+            zip.entries().asSequence().forEach { entry ->
+                val file = File(destDir, entry.name)
+                if (entry.isDirectory) {
+                    file.mkdirs()
+                } else {
+                    file.parentFile?.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(file).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            }
+        }
+        tempFile.delete()
+    }
+}
+================================================
+FILE: ./app/build.gradle.kts
+================================================
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("kotlin-kapt")
+}
+
+android {
+    namespace = "com.yourapp.dubbing"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.yourapp.dubbing"
+        minSdk = 23
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary = true
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    buildFeatures {
+        compose = true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.5"
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+dependencies {
+    implementation(project(":dubbing-engine"))
+
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.activity:activity-compose:1.8.0")
+    implementation(platform("androidx.compose:compose-bom:2023.10.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.navigation:navigation-compose:2.7.5")
+    implementation("androidx.media3:media3-exoplayer:1.3.0")
+    implementation("androidx.media3:media3-ui:1.3.0")
+    
+    
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2023.10.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+}
+================================================
+FILE: ./build.gradle.kts
+================================================
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    id("com.android.application") version "8.2.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.20" apply false
+    id("com.android.library") version "8.2.0" apply false
+}
+================================================
+FILE: ./dubbing-engine/build.gradle.kts
+================================================
+plugins {
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.yourapp.dubbing.engine"
+    compileSdk = 34
+
+    defaultConfig {
+        minSdk = 23
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17 -O3 -fvisibility=hidden"
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Media3 for video processing
+    implementation("androidx.media3:media3-transformer:1.3.0")
+    implementation("androidx.media3:media3-effect:1.3.0")
+    implementation("androidx.media3:media3-common:1.3.0")
+
+    // ONNX Runtime
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+
+    // Vosk STT
+    implementation("com.alphacephei:vosk-android:0.3.47")
+
+    // Downloading and extraction
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.apache.commons:commons-compress:1.26.0")
+
+    // Note: Pitch detection and SentencePiece are temporarily stubbed.
+    // TarsosDSP and sentencepiece-android dependencies are removed.
+}
+================================================
+FILE: ./settings.gradle.kts
+================================================
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+
+rootProject.name = "VideoDubbingApp"
+include(":app")
+include(":dubbing-engine")
+================================================
+FILE: ./dubbing-engine/src/main/cpp/CMakeLists.txt
+================================================
+cmake_minimum_required(VERSION 3.22.1)
+project("dubbingengine")
+
+# Sonic library for audio pitch/speed change
+add_library(sonic STATIC
+        sonic/sonic.c)
+target_include_directories(sonic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sonic)
+
+# JNI wrapper for Sonic
+add_library(sonic_jni SHARED sonic_jni.cpp)
+target_link_libraries(sonic_jni sonic log)
+
+# Pitch detector (YIN algorithm)
+add_library(pitch_detector SHARED pitch_detector.cpp)
+target_link_libraries(pitch_detector log)
+================================================
+FILE: ./app/src/main/AndroidManifest.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VideoDubbingApp"
+        android:requestLegacyExternalStorage="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.VideoDubbingApp">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+================================================
+FILE: ./dubbing-engine/src/main/AndroidManifest.xml
+================================================
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Library module doesn't need much -->
+</manifest>
+================================================
+FILE: ./dubbing-engine/proguard-rules.pro
+================================================
+
+================================================
+FILE: ./app/src/main/res/values/strings.xml
+================================================
+<resources>
+    <string name="app_name">Video Dubbing App</string>
+</resources>
+================================================
+FILE: ./app/src/main/res/values/themes.xml
+================================================
+<resources>
+    <style name="Theme.VideoDubbingApp" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
