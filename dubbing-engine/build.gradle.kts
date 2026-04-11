@@ -65,7 +65,8 @@ dependencies {
 
     // Sherpa-ONNX for offline TTS
     implementation("com.github.k2-fsa:sherpa-onnx:1.10.30")
-
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.12.36")
+    
     // Note: Pitch detection and SentencePiece are temporarily stubbed.
     // TarsosDSP and sentencepiece-android dependencies are removed.
 }
