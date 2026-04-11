@@ -63,8 +63,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.26.0")
 
-    // Sherpa-ONNX offline TTS (local AAR)
-    implementation(files("libs/sherpa-onnx-1.12.36.aar"))
+    // eSpeak-NG for offline TTS
+    implementation("com.github.reecedunn:espeak-for-android:1.52.0")
 
     // Note: Pitch detection and SentencePiece are temporarily stubbed.
 }
