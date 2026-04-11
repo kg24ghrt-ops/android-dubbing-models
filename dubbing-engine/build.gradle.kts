@@ -63,10 +63,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.26.0")
 
-    // Sherpa-ONNX for offline TTS
-    implementation("com.github.k2-fsa:sherpa-onnx:1.10.30")
-    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.12.36")
+    // Sherpa-ONNX offline TTS (local AAR)
     implementation(files("libs/sherpa-onnx-1.12.36.aar"))
+
     // Note: Pitch detection and SentencePiece are temporarily stubbed.
-    // TarsosDSP and sentencepiece-android dependencies are removed.
 }
