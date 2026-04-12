@@ -2,8 +2,6 @@ package com.yourapp.dubbing.engine
 
 import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineTts
-import com.k2fsa.sherpa.onnx.OfflineTtsConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -16,16 +14,12 @@ class TextToSpeechEngine(private val context: Context) {
 
     suspend fun initialize(modelDir: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val config = OfflineTtsConfig(
-                model = OfflineTtsModelConfig(
-                    model = "$modelDir/model.onnx",
-                    tokens = "$modelDir/tokens.txt",
-                    numThreads = 2,
-                    provider = "cpu"
-                ),
-                maxNumSentences = 1
+            tts = OfflineTts(
+                model = "$modelDir/model.onnx",
+                tokens = "$modelDir/tokens.txt",
+                numThreads = 2,
+                provider = "cpu"
             )
-            tts = OfflineTts(config)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
