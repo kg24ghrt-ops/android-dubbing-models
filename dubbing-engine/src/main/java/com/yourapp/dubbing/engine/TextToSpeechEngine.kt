@@ -4,7 +4,6 @@ import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
-import com.k2fsa.sherpa.onnx.PiperModelConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -19,10 +18,8 @@ class TextToSpeechEngine(private val context: Context) {
         try {
             val config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
-                    piper = PiperModelConfig(
-                        model = "$modelDir/en_US-lessac-medium.onnx",
-                        tokens = "$modelDir/tokens.txt"
-                    ),
+                    model = "$modelDir/model.onnx",
+                    tokens = "$modelDir/tokens.txt",
                     numThreads = 2,
                     provider = "cpu"
                 ),
@@ -44,7 +41,7 @@ class TextToSpeechEngine(private val context: Context) {
         val text = texts.joinToString(" ")
         val outputFile = File(context.cacheDir, "tts_output.wav")
 
-        val audio = tts?.generate(text, sid = 0, speed = 1.0f) ?: return@withContext outputFile
+        val audio = tts?.generate(text) ?: return@withContext outputFile
         val samples = audio.samples
 
         val pcmShorts = ShortArray(samples.size)

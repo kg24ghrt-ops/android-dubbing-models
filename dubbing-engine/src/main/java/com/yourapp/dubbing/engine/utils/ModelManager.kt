@@ -12,7 +12,6 @@ import java.util.zip.ZipFile
 
 object ModelManager {
 
-    // Vosk speech-recognition models
     private val VOSK_URLS = mapOf(
         "es" to "https://alphacephei.com/vosk/models/vosk-model-small-es-0.22.zip",
         "ja" to "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip",
@@ -21,7 +20,6 @@ object ModelManager {
         "zh" to "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
     )
 
-    // Piper voice model for Sherpa-ONNX (English, female, medium quality)
     private const val PIPER_MODEL_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/piper-lessac-medium.tar.bz2"
     private const val PIPER_VOICE_NAME = "en_US-lessac-medium"
@@ -38,17 +36,12 @@ object ModelManager {
     }
 
     suspend fun ensureTranslatorModel(context: Context): String {
-        // Translation is stubbed – will be implemented later with NLLB-200
         return "/dummy/translator"
     }
 
-    /**
-     * Downloads (if needed) the Piper voice model for Sherpa-ONNX TTS.
-     * @return absolute path to the directory containing .onnx and tokens.txt
-     */
     suspend fun ensurePiperVoice(context: Context, voiceName: String = PIPER_VOICE_NAME): String {
         val modelDir = File(context.getExternalFilesDir(null), "models/tts/piper")
-        val onnxFile = File(modelDir, "$voiceName.onnx")
+        val onnxFile = File(modelDir, "model.onnx")
         val tokensFile = File(modelDir, "tokens.txt")
 
         if (!onnxFile.exists() || !tokensFile.exists()) {
@@ -57,8 +50,6 @@ object ModelManager {
         }
         return modelDir.absolutePath
     }
-
-    // ---------- Helper functions ----------
 
     private suspend fun downloadFile(url: String, destination: File) {
         val client = OkHttpClient.Builder().build()
