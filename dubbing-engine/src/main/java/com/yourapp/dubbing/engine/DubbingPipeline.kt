@@ -28,8 +28,9 @@ class DubbingPipeline(private val context: Context) {
                 translator = Translator(context, translatorModelPath)
 
                 onProgress("Initializing TTS engine...")
+                val ttsModelPath = ModelManager.ensurePiperVoice(context)
                 ttsEngine = TextToSpeechEngine(context)
-                ttsEngine.initialize().getOrThrow()
+                ttsEngine.initialize(ttsModelPath).getOrThrow()
 
                 genderDetector = GenderDetector()
                 videoDubber = VideoDubber(context)
